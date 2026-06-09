@@ -95,24 +95,18 @@ function renderPlans(plans) {
 }
 
 async function refreshSessions() {
-  const body = await api('/sessions');
+  const body = await api('/sessions?include_usage=1');
   const sessions = body.sessions || [];
-  const usageData = await Promise.all(
-    sessions.map(async (s) => {
-      const usage = await api(`/sessions/${s.id}/usage`).catch(() => null);
-      return { s, usage };
-    })
-  );
 
   const table = document.getElementById('sessions');
-  table.innerHTML = usageData.map(({s, usage}) => `
+  table.innerHTML = sessions.map((s) => `
     <tr>
       <td><code>${s.id.slice(0, 8)}</code></td>
       <td>${s.app}</td>
       <td>${s.status}</td>
       <td>${s.plan}</td>
-      <td>${usage ? `${usage.elapsed_minutes}m (${usage.billable_minutes} billable)` : '-'}</td>
-      <td>${usage ? `$${usage.estimated_charge_usd.toFixed(2)}` : '-'}</td>
+      <td>${s.usage ? `${s.usage.elapsed_minutes}m (${s.usage.billable_minutes} billable)` : '-'}</td>
+      <td>${s.usage ? `$${s.usage.estimated_charge_usd.toFixed(2)}` : '-'}</td>
     </tr>
   `).join('');
 }
@@ -157,6 +151,7 @@ bootstrap().catch((err) => {
 
 class TryContainerHandler(BaseHTTPRequestHandler):
     service = TryContainerService(base_domain=os.getenv("TRYCONTAINER_BASE_DOMAIN", "trycontainer.com"))
+    allowed_origin = os.getenv("TRYCONTAINER_ALLOWED_ORIGIN", "")
 
     def do_OPTIONS(self) -> None:
         self.send_response(HTTPStatus.NO_CONTENT)
@@ -179,7 +174,8 @@ class TryContainerHandler(BaseHTTPRequestHandler):
             query = parse_qs(parsed.query)
             limit_raw = query.get("limit", ["25"])[0]
             limit = int(limit_raw) if limit_raw.isdigit() else 25
-            return self._json({"sessions": self.service.list_sessions(limit=limit)})
+            include_usage = query.get("include_usage", ["0"])[0] in {"1", "true", "True"}
+            return self._json({"sessions": self.service.list_sessions(limit=limit, include_usage=include_usage)})
         if parsed.path.startswith("/sessions/") and parsed.path.endswith("/usage"):
             session_id = parsed.path.split("/")[2]
             usage = self.service.get_session_usage(session_id)
@@ -256,9 +252,10 @@ class TryContainerHandler(BaseHTTPRequestHandler):
             raise ValueError("Malformed JSON body") from exc
 
     def _send_cors_headers(self) -> None:
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        if self.allowed_origin:
+            self.send_header("Access-Control-Allow-Origin", self.allowed_origin)
+            self.send_header("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def _json(self, payload: dict, status: HTTPStatus = HTTPStatus.OK) -> None:
         encoded = json.dumps(payload).encode("utf-8")

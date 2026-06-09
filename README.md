@@ -23,6 +23,7 @@ Environment overrides:
 - `TRYCONTAINER_HOST` (default: `0.0.0.0`)
 - `TRYCONTAINER_PORT` (default: `8080`)
 - `TRYCONTAINER_BASE_DOMAIN` (default: `trycontainer.com`)
+- `TRYCONTAINER_ALLOWED_ORIGIN` (default: unset/no CORS)
 
 ## Quick API usage
 
@@ -44,12 +45,17 @@ curl -X POST http://127.0.0.1:8080/sessions \
 # list recent sessions
 curl http://127.0.0.1:8080/sessions
 
+# list sessions with embedded usage/metering
+curl http://127.0.0.1:8080/sessions?include_usage=1
+
 # inspect metering for a session
 curl http://127.0.0.1:8080/sessions/<session_id>/usage
 
 # end a session early
 curl -X DELETE http://127.0.0.1:8080/sessions/<session_id>
 ```
+
+Metering rounds elapsed time up to the next minute (`ceil`) so billing is minute-based.
 
 ## Run tests
 

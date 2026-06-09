@@ -70,3 +70,9 @@ class ServiceTests(TestCase):
     def test_unsupported_plan_raises(self) -> None:
         with self.assertRaises(ValueError):
             self.service.launch_session("openwebui", plan_name="enterprise")
+
+    def test_list_sessions_can_include_usage(self) -> None:
+        self.service.launch_session("openwebui", plan_name="metered", ttl_minutes=60)
+        sessions = self.service.list_sessions(include_usage=True)
+        self.assertEqual(len(sessions), 1)
+        self.assertIn("usage", sessions[0])

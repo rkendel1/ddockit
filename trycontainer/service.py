@@ -137,7 +137,7 @@ class TryContainerService:
     def list_pricing(self) -> list[dict[str, Any]]:
         return [dict(plan) for plan in PRICING_PLANS]
 
-    def list_sessions(self, limit: int = 25) -> list[dict[str, Any]]:
+    def list_sessions(self, limit: int = 25, include_usage: bool = False) -> list[dict[str, Any]]:
         self.cleanup_expired()
         safe_limit = max(1, min(limit, 200))
         with self._connect() as conn:
@@ -145,7 +145,15 @@ class TryContainerService:
                 "SELECT * FROM sessions ORDER BY created_at DESC LIMIT ?",
                 (safe_limit,),
             ).fetchall()
-        return [self._public_session(dict(row)) for row in rows]
+        sessions = [self._public_session(dict(row)) for row in rows]
+        if not include_usage:
+            return sessions
+
+        now = _utc_now()
+        for session in sessions:
+            usage = self.get_session_usage(session["id"], now=now)
+            session["usage"] = usage
+        return sessions
 
     def launch_session(self, app_slug: str, ttl_minutes: int | None = None, plan_name: str = "free") -> dict[str, Any]:
         app = self._find_app(app_slug)
