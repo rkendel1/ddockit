@@ -1,9 +1,9 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 
-from trycontainer.service import TryContainerService, _utc_now
+from trycontainer.service import MAX_TTL_MINUTES, TryContainerService, _utc_now
 
 
 class ServiceTests(TestCase):
@@ -26,7 +26,11 @@ class ServiceTests(TestCase):
 
     def test_ttl_is_capped_to_day(self) -> None:
         session = self.service.launch_session("n8n", ttl_minutes=10_000)
-        self.assertEqual(session["ttl_minutes"], 1440)
+        self.assertEqual(session["ttl_minutes"], MAX_TTL_MINUTES)
+
+    def test_ttl_has_minimum_floor(self) -> None:
+        session = self.service.launch_session("n8n", ttl_minutes=0)
+        self.assertEqual(session["ttl_minutes"], 1)
 
     def test_cleanup_expires_running_sessions(self) -> None:
         session = self.service.launch_session("flowise", ttl_minutes=1)
@@ -43,3 +47,26 @@ class ServiceTests(TestCase):
         session = self.service.launch_session("plane")
         self.assertTrue(self.service.destroy_session(session["id"]))
         self.assertTrue(self.service.destroy_session(session["id"]))
+
+    def test_metered_plan_bills_after_free_window(self) -> None:
+        session = self.service.launch_session("openwebui", ttl_minutes=60, plan_name="metered")
+        created_at = datetime.fromisoformat(session["created_at"])
+        now = created_at + timedelta(minutes=45)
+        usage = self.service.get_session_usage(session["id"], now=now)
+        assert usage is not None
+        self.assertEqual(usage["elapsed_minutes"], 45)
+        self.assertEqual(usage["billable_minutes"], 15)
+        self.assertEqual(usage["estimated_charge_usd"], 0.3)
+
+    def test_fixed_price_plan_remains_fixed(self) -> None:
+        session = self.service.launch_session("openwebui", ttl_minutes=90, plan_name="2-hour-pass")
+        created_at = datetime.fromisoformat(session["created_at"])
+        now = created_at + timedelta(minutes=90)
+        usage = self.service.get_session_usage(session["id"], now=now)
+        assert usage is not None
+        self.assertEqual(usage["billable_minutes"], 0)
+        self.assertEqual(usage["estimated_charge_usd"], 1.0)
+
+    def test_unsupported_plan_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            self.service.launch_session("openwebui", plan_name="enterprise")

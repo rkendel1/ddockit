@@ -1,13 +1,14 @@
 # ddockit
 
-TryContainer MVP for instantly evaluating self-hosted apps without local Docker setup.
+TryContainer is a working MVP for instantly evaluating self-hosted apps without local Docker setup.
 
-## What this MVP provides
+## What this app provides
 
-- Curated OSS app catalog (AI, CRM, workflow, database, etc.)
-- Disposable app sessions with generated `https://<subdomain>.trycontainer.com` URLs
-- TTL-based auto-destruction (default `30m`)
-- Lightweight control-plane API (`/apps`, `/sessions`, `/pricing`)
+- Curated OSS catalog (OpenWebUI, n8n, Plane, Immich, Supabase, and more)
+- One-click disposable sessions with trial URLs (`https://<subdomain>.trycontainer.com`)
+- Session lifecycle API (launch, list, usage, destroy, TTL cleanup)
+- Metered billing support (`free`, `metered`, `2-hour-pass`, `day-pass`, `subscription`)
+- Browser UI at `/` to launch and monitor sessions from anywhere
 
 ## Run locally
 
@@ -15,21 +16,36 @@ TryContainer MVP for instantly evaluating self-hosted apps without local Docker 
 python -m trycontainer
 ```
 
-Server starts on `http://127.0.0.1:8080`.
+By default it binds to `0.0.0.0:8080` so it can be reached from other hosts in your network.
+
+Environment overrides:
+
+- `TRYCONTAINER_HOST` (default: `0.0.0.0`)
+- `TRYCONTAINER_PORT` (default: `8080`)
+- `TRYCONTAINER_BASE_DOMAIN` (default: `trycontainer.com`)
 
 ## Quick API usage
 
 ```bash
+# health check
+curl http://127.0.0.1:8080/health
+
 # list available apps
 curl http://127.0.0.1:8080/apps
 
-# launch a 30 minute trial
+# list pricing plans
+curl http://127.0.0.1:8080/pricing
+
+# launch a trial session
 curl -X POST http://127.0.0.1:8080/sessions \
   -H 'content-type: application/json' \
-  -d '{"app":"openwebui","ttl_minutes":30}'
+  -d '{"app":"openwebui","plan":"metered","ttl_minutes":60}'
 
-# fetch session status
-curl http://127.0.0.1:8080/sessions/<session_id>
+# list recent sessions
+curl http://127.0.0.1:8080/sessions
+
+# inspect metering for a session
+curl http://127.0.0.1:8080/sessions/<session_id>/usage
 
 # end a session early
 curl -X DELETE http://127.0.0.1:8080/sessions/<session_id>
