@@ -35,6 +35,12 @@ HTML_INDEX = """<!doctype html>
     <p class=\"muted\">Launch disposable OSS app trials from anywhere. No local Docker required.</p>
 
     <section class=\"card\">
+      <h3>How one-click works</h3>
+      <p>Choose an app, plan, and TTL, click <strong>Try now</strong>, then open the generated live URL to evaluate the OSS project.</p>
+      <p class=\"muted\">This page is the UI for launching and monitoring sessions. Use the table below to track usage and estimated charges.</p>
+    </section>
+
+    <section class=\"card\">
       <h3>Launch trial</h3>
       <p>Click once, receive a live URL, then usage is metered automatically.</p>
       <form id=\"launchForm\">
