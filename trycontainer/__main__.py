@@ -32,11 +32,11 @@ HTML_INDEX = """<!doctype html>
 <body>
   <main>
     <h1>TryContainer</h1>
-    <p class=\"muted\">Launch disposable OSS app trials from anywhere. No local Docker required.</p>
+    <p class=\"muted\">Launch disposable OSS app trials from anywhere. Safety. Speed. Zero setup. Zero commitment. Isolation. Curiosity.</p>
 
     <section class=\"card\">
       <h3>How one-click works</h3>
-      <p>Choose an app, plan, and TTL, click <strong>Try now</strong>, then open the generated live URL to evaluate the OSS project.</p>
+      <p><strong>Find project -> Click Try -> Use immediately -> Destroy.</strong> Every launch is a fresh per-user evaluation URL with automatic TTL cleanup.</p>
       <p class=\"muted\">This page is the UI for launching and monitoring sessions. Use the table below to track usage and estimated charges.</p>
     </section>
 
