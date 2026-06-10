@@ -6,6 +6,51 @@ TryContainer is a working MVP for instantly evaluating self-hosted apps without 
 
 TryContainer is an evaluation sandbox for open-source software (OSS) projects. It lets you launch a short-lived hosted trial, click into a live URL, and decide whether the project is worth deeper adoption.
 
+This is an **evaluation environment product** first. Containers are just the delivery mechanism.
+
+## The core value proposition
+
+Users are not buying a container runtime. They are buying:
+
+- Safety
+- Speed
+- Zero setup
+- Zero commitment
+- Isolation
+- Curiosity
+
+Traditional flow:
+
+```text
+Find project
+↓
+Read README
+↓
+Install Docker
+↓
+Configure environment variables
+↓
+Pull images
+↓
+Wait
+↓
+Break something
+↓
+Decide maybe it's not worth it
+```
+
+TryContainer flow:
+
+```text
+Find project
+↓
+Click Try
+↓
+Use immediately
+↓
+Destroy
+```
+
 ## What this app provides
 
 - Curated OSS catalog (OpenWebUI, n8n, Plane, Immich, Supabase, and more)
@@ -43,6 +88,50 @@ Environment overrides:
 - **Evaluate OpenWebUI for AI chat workflows**: launch `openwebui` on `metered`, share the generated URL with teammates, and review usage cost before longer tests.
 - **Evaluate n8n for automation**: launch `n8n` with `2-hour-pass` for a fixed-price deep dive and destroy the session when finished.
 - **Evaluate Supabase for quick schema testing**: launch `supabase` with a short TTL (`30-60` minutes), validate setup speed, then compare with other catalog apps.
+
+## Who this is for
+
+- **Self-hosting hobbyists** evaluating projects such as Immich, Jellyfin, AppFlowy, Plane, OpenProject, NocoDB, and Open WebUI
+- **IT teams** that need disposable evaluation instances before approval decisions
+- **Consultants** that evaluate software repeatedly and need fast resettable environments
+- **OSS maintainers** that want a reliable "Try it now" experience for contributors and evaluators
+
+## MVP roadmap
+
+### Phase 1 (must-have)
+
+Input: GitHub URL
+
+TryContainer should:
+
+1. Detect Dockerfile or docker-compose
+2. Build
+3. Generate URL
+4. Auto-destroy after N minutes
+
+For the first strict version, require a Dockerfile and reject unsupported repositories quickly.
+
+### Phase 2
+
+Curated one-click templates (WordPress, Immich, Plane, Open WebUI, AppFlowy, NocoDB, and similar) for rapid adoption.
+
+### Phase 3
+
+Snapshots and conversion to longer-lived deployments:
+
+```text
+Try
+↓
+Love it
+↓
+Keep it
+```
+
+## Hard problems to handle from day one
+
+- **Cost control**: enforce CPU limits, memory limits, runtime limits, and automatic shutdowns
+- **Arbitrary repositories**: start narrow (Dockerfile required), then expand support over time
+- **Security**: strict isolation, no privileged containers, egress controls, resource quotas, and abuse detection
 
 ## Quick API usage
 
