@@ -3,7 +3,30 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 
-from trycontainer.service import MAX_TTL_MINUTES, TryContainerService, _utc_now
+from trycontainer.service import (
+    DockerExecutionRuntime,
+    ExecutionRuntimeError,
+    MAX_TTL_MINUTES,
+    TryContainerService,
+    _utc_now,
+)
+
+
+class FakeExecutionRuntime:
+    def __init__(self) -> None:
+        self.terminated: list[tuple[str | None, str]] = []
+
+    def launch(self, repo_url: str, session_id: str, image_name: str) -> dict[str, object]:
+        if "bad" in repo_url:
+            raise ExecutionRuntimeError("Unsafe configuration detected")
+        return {
+            "container_id": f"exec-{session_id}",
+            "container_port": 3000,
+            "public_url": f"https://{session_id}.trycontainer.test",
+        }
+
+    def terminate(self, container_id: str | None, image_name: str) -> None:
+        self.terminated.append((container_id, image_name))
 
 
 class ServiceTests(TestCase):
@@ -11,7 +34,8 @@ class ServiceTests(TestCase):
         self.tmpdir = TemporaryDirectory()
         self.addCleanup(self.tmpdir.cleanup)
         db_path = Path(self.tmpdir.name) / "test.db"
-        self.service = TryContainerService(db_path=db_path)
+        self.execution_runtime = FakeExecutionRuntime()
+        self.service = TryContainerService(db_path=db_path, execution_runtime=self.execution_runtime)
 
     def test_catalog_has_multiple_apps(self) -> None:
         apps = self.service.list_apps()
@@ -76,3 +100,58 @@ class ServiceTests(TestCase):
         sessions = self.service.list_sessions(include_usage=True)
         self.assertEqual(len(sessions), 1)
         self.assertIn("usage", sessions[0])
+
+    def test_execution_launch_returns_running_and_stores_running_session(self) -> None:
+        result = self.service.launch_execution("https://github.com/acme/project")
+        self.assertEqual(result["status"], "running")
+        session = self.service.get_execution_session(result["sessionId"])
+        assert session is not None
+        self.assertEqual(session["status"], "running")
+        self.assertEqual(session["container_port"], 3000)
+        self.assertTrue(session["public_url"].endswith(".trycontainer.test"))
+
+    def test_execution_launch_failure_marks_session_failed(self) -> None:
+        with self.assertRaises(ExecutionRuntimeError):
+            self.service.launch_execution("https://github.com/acme/bad-repo")
+
+        sessions = self.service.list_execution_sessions(limit=5)
+        self.assertEqual(len(sessions), 1)
+        self.assertEqual(sessions[0]["status"], "failed")
+
+    def test_execution_destroy_is_idempotent(self) -> None:
+        result = self.service.launch_execution("https://github.com/acme/project")
+        session_id = result["sessionId"]
+        self.assertTrue(self.service.destroy_execution_session(session_id))
+        self.assertTrue(self.service.destroy_execution_session(session_id))
+        self.assertEqual(len(self.execution_runtime.terminated), 1)
+
+    def test_runtime_rejects_privileged_compose(self) -> None:
+        runtime = DockerExecutionRuntime(workspace_root=self.tmpdir.name, base_domain="trycontainer.test")
+        workspace = Path(self.tmpdir.name) / "scan"
+        workspace.mkdir()
+        (workspace / "Dockerfile").write_text("FROM python:3.12\n", encoding="utf-8")
+        (workspace / "docker-compose.yml").write_text(
+            "services:\n  app:\n    privileged: true\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(ExecutionRuntimeError):
+            runtime._scan_for_prohibited_config(workspace)
+
+    def test_runtime_rejects_host_networking_compose(self) -> None:
+        runtime = DockerExecutionRuntime(workspace_root=self.tmpdir.name, base_domain="trycontainer.test")
+        workspace = Path(self.tmpdir.name) / "scan-host-network"
+        workspace.mkdir()
+        (workspace / "Dockerfile").write_text("FROM python:3.12\n", encoding="utf-8")
+        (workspace / "docker-compose.yml").write_text(
+            "services:\n  app:\n    network_mode: host\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(ExecutionRuntimeError):
+            runtime._scan_for_prohibited_config(workspace)
+
+    def test_runtime_rejects_non_github_repo_urls(self) -> None:
+        runtime = DockerExecutionRuntime(workspace_root=self.tmpdir.name, base_domain="trycontainer.test")
+        with self.assertRaises(ExecutionRuntimeError):
+            runtime._validate_repo_url("https://example.com/private/repo")

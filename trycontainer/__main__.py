@@ -6,7 +6,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from .service import TryContainerService
+from .service import ExecutionRuntimeError, TryContainerService
 
 HTML_INDEX = """<!doctype html>
 <html lang=\"en\">
@@ -153,6 +153,7 @@ bootstrap().catch((err) => {
 </body>
 </html>
 """
+MAX_REPO_URL_LENGTH = 2048
 
 
 class TryContainerHandler(BaseHTTPRequestHandler):
@@ -167,6 +168,7 @@ class TryContainerHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         self.service.cleanup_expired()
         parsed = urlparse(self.path)
+        path_parts = [part for part in parsed.path.split("/") if part]
 
         if parsed.path == "/":
             return self._html(HTML_INDEX)
@@ -194,12 +196,34 @@ class TryContainerHandler(BaseHTTPRequestHandler):
             if session is None:
                 return self._json({"error": "Session not found"}, status=HTTPStatus.NOT_FOUND)
             return self._json({"session": session})
+        if len(path_parts) == 3 and path_parts[:2] == ["api", "execution"]:
+            execution_id = path_parts[2]
+            session = self.service.get_execution_session(execution_id)
+            if session is None:
+                return self._json({"error": "Session not found"}, status=HTTPStatus.NOT_FOUND)
+            return self._json({"status": session["status"], "url": session["public_url"]})
 
         return self._json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:
         self.service.cleanup_expired()
         parsed = urlparse(self.path)
+
+        if parsed.path == "/api/execution/launch":
+            try:
+                body = self._read_body()
+            except ValueError as exc:
+                return self._json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            repo_url = body.get("repoUrl")
+            if not isinstance(repo_url, str) or not repo_url:
+                return self._json({"error": "'repoUrl' is required"}, status=HTTPStatus.BAD_REQUEST)
+            if len(repo_url) > MAX_REPO_URL_LENGTH:
+                return self._json({"error": "'repoUrl' exceeds maximum length"}, status=HTTPStatus.BAD_REQUEST)
+            try:
+                result = self.service.launch_execution(repo_url=repo_url)
+            except ExecutionRuntimeError as exc:
+                return self._json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return self._json(result, status=HTTPStatus.CREATED)
 
         if parsed.path == "/sessions":
             try:
@@ -233,6 +257,15 @@ class TryContainerHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:
         parsed = urlparse(self.path)
+        path_parts = [part for part in parsed.path.split("/") if part]
+
+        if len(path_parts) == 3 and path_parts[:2] == ["api", "execution"]:
+            execution_id = path_parts[2]
+            removed = self.service.destroy_execution_session(execution_id)
+            if not removed:
+                return self._json({"error": "Session not found"}, status=HTTPStatus.NOT_FOUND)
+            return self._json({}, status=HTTPStatus.NO_CONTENT)
+
         if parsed.path.startswith("/sessions/"):
             session_id = parsed.path.rsplit("/", 1)[-1]
             removed = self.service.destroy_session(session_id)
@@ -289,6 +322,8 @@ class TryContainerHandler(BaseHTTPRequestHandler):
 def main() -> None:
     host = os.getenv("TRYCONTAINER_HOST", "0.0.0.0")
     port = int(os.getenv("TRYCONTAINER_PORT", "8080"))
+    cleanup_interval = int(os.getenv("TRYCONTAINER_CLEANUP_INTERVAL_SECONDS", "60"))
+    TryContainerHandler.service.start_cleanup_worker(interval_seconds=cleanup_interval)
     server = ThreadingHTTPServer((host, port), TryContainerHandler)
     print(f"TryContainer MVP listening on http://{host}:{port}")
     server.serve_forever()
