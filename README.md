@@ -56,6 +56,7 @@ Destroy
 - Curated OSS catalog (OpenWebUI, n8n, Plane, Immich, Supabase, and more)
 - One-click disposable sessions with trial URLs (`https://<subdomain>.trycontainer.com`)
 - Session lifecycle API (launch, list, usage, destroy, TTL cleanup)
+- Real execution API for repository-backed sessions (`/api/execution/*`)
 - Metered billing support (`free`, `metered`, `2-hour-pass`, `day-pass`, `subscription`)
 - Browser UI at `/` to launch and monitor sessions from anywhere
 
@@ -149,6 +150,17 @@ curl http://127.0.0.1:8080/pricing
 curl -X POST http://127.0.0.1:8080/sessions \
   -H 'content-type: application/json' \
   -d '{"app":"openwebui","plan":"metered","ttl_minutes":60}'
+
+# launch a repository execution session
+curl -X POST http://127.0.0.1:8080/api/execution/launch \
+  -H 'content-type: application/json' \
+  -d '{"repoUrl":"https://github.com/org/project"}'
+
+# check execution session status
+curl http://127.0.0.1:8080/api/execution/<session_id>
+
+# destroy execution session
+curl -X DELETE http://127.0.0.1:8080/api/execution/<session_id>
 
 # list recent sessions
 curl http://127.0.0.1:8080/sessions
