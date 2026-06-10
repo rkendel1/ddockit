@@ -10,15 +10,33 @@ from trycontainer.service import (
     TryContainerService,
     _utc_now,
 )
+from trycontainer.runtime import RuntimeProfile
 
 
 class FakeExecutionRuntime:
     def __init__(self) -> None:
         self.terminated: list[tuple[str | None, str]] = []
+        self.last_launch: dict[str, object] | None = None
 
-    def launch(self, repo_url: str, session_id: str, image_name: str) -> dict[str, object]:
+    def launch(
+        self,
+        repo_url: str,
+        session_id: str,
+        image_name: str,
+        environment_variables: dict[str, str] | None = None,
+        cpu_limit: str | None = None,
+        memory_limit: str | None = None,
+    ) -> dict[str, object]:
         if "bad" in repo_url:
             raise ExecutionRuntimeError("Unsafe configuration detected")
+        self.last_launch = {
+            "repo_url": repo_url,
+            "session_id": session_id,
+            "image_name": image_name,
+            "environment_variables": environment_variables or {},
+            "cpu_limit": cpu_limit,
+            "memory_limit": memory_limit,
+        }
         return {
             "container_id": f"exec-{session_id}",
             "container_port": 3000,
@@ -107,8 +125,37 @@ class ServiceTests(TestCase):
         session = self.service.get_execution_session(result["sessionId"])
         assert session is not None
         self.assertEqual(session["status"], "running")
+        self.assertEqual(session["profile"], "standard")
+        self.assertEqual(session["capabilities"], "[]")
+        self.assertEqual(session["environment_id"], f"env_{result['sessionId']}")
         self.assertEqual(session["container_port"], 3000)
         self.assertTrue(session["public_url"].endswith(".trycontainer.test"))
+
+    def test_execution_launch_with_capabilities_injects_environment(self) -> None:
+        result = self.service.launch_execution(
+            "https://github.com/acme/project",
+            capability_names=["postgres", "redis", "openaiProxy"],
+        )
+        assert self.execution_runtime.last_launch is not None
+        self.assertEqual(self.execution_runtime.last_launch["cpu_limit"], "2")
+        self.assertEqual(self.execution_runtime.last_launch["memory_limit"], "2gb")
+        env = self.execution_runtime.last_launch["environment_variables"]
+        assert isinstance(env, dict)
+        self.assertIn("DATABASE_URL", env)
+        self.assertIn("REDIS_URL", env)
+        self.assertEqual(env["OPENAI_API_KEY"], "demo")
+
+        environment = self.service.get_execution_environment(result["sessionId"])
+        assert environment is not None
+        self.assertEqual(environment["profile"], "standard")
+        self.assertEqual(environment["capabilities"], ["postgres", "redis", "openaiProxy"])
+        self.assertEqual(environment["environmentId"], f"env_{result['sessionId']}")
+
+    def test_execution_launch_uses_profile_resources(self) -> None:
+        self.service.launch_execution("https://github.com/acme/project", profile=RuntimeProfile.HEAVY)
+        assert self.execution_runtime.last_launch is not None
+        self.assertEqual(self.execution_runtime.last_launch["cpu_limit"], "4")
+        self.assertEqual(self.execution_runtime.last_launch["memory_limit"], "8gb")
 
     def test_execution_launch_failure_marks_session_failed(self) -> None:
         with self.assertRaises(ExecutionRuntimeError):
