@@ -20,4 +20,4 @@ class OnboardingCopyTests(TestCase):
         self.assertIn("How one-click works", text)
         self.assertIn("This page is the UI for launching and monitoring sessions.", text)
         self.assertIn("Safety. Speed. Zero setup. Zero commitment. Isolation. Curiosity.", text)
-        self.assertIn("Find project → Click Try → Use immediately → Destroy.", text)
+        self.assertIn("Find project -> Click Try -> Use immediately -> Destroy.", text)

@@ -36,7 +36,7 @@ HTML_INDEX = """<!doctype html>
 
     <section class=\"card\">
       <h3>How one-click works</h3>
-      <p><strong>Find project → Click Try → Use immediately → Destroy.</strong> Every launch is a fresh per-user evaluation URL with automatic TTL cleanup.</p>
+      <p><strong>Find project -> Click Try -> Use immediately -> Destroy.</strong> Every launch is a fresh per-user evaluation URL with automatic TTL cleanup.</p>
       <p class=\"muted\">This page is the UI for launching and monitoring sessions. Use the table below to track usage and estimated charges.</p>
     </section>
 
