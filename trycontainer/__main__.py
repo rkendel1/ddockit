@@ -153,6 +153,7 @@ bootstrap().catch((err) => {
 </body>
 </html>
 """
+MAX_REPO_URL_LENGTH = 2048
 
 
 class TryContainerHandler(BaseHTTPRequestHandler):
@@ -216,6 +217,8 @@ class TryContainerHandler(BaseHTTPRequestHandler):
             repo_url = body.get("repoUrl")
             if not isinstance(repo_url, str) or not repo_url:
                 return self._json({"error": "'repoUrl' is required"}, status=HTTPStatus.BAD_REQUEST)
+            if len(repo_url) > MAX_REPO_URL_LENGTH:
+                return self._json({"error": "'repoUrl' exceeds maximum length"}, status=HTTPStatus.BAD_REQUEST)
             try:
                 result = self.service.launch_execution(repo_url=repo_url)
             except ExecutionRuntimeError as exc:
@@ -319,7 +322,8 @@ class TryContainerHandler(BaseHTTPRequestHandler):
 def main() -> None:
     host = os.getenv("TRYCONTAINER_HOST", "0.0.0.0")
     port = int(os.getenv("TRYCONTAINER_PORT", "8080"))
-    TryContainerHandler.service.start_cleanup_worker(interval_seconds=60)
+    cleanup_interval = int(os.getenv("TRYCONTAINER_CLEANUP_INTERVAL_SECONDS", "60"))
+    TryContainerHandler.service.start_cleanup_worker(interval_seconds=cleanup_interval)
     server = ThreadingHTTPServer((host, port), TryContainerHandler)
     print(f"TryContainer MVP listening on http://{host}:{port}")
     server.serve_forever()

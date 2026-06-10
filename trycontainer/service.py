@@ -121,15 +121,24 @@ class DockerExecutionRuntime:
         base_domain: str = DEFAULT_BASE_DOMAIN,
         docker_network: str = "ddockit",
         workspace_root: str | Path = "/tmp/ddockit",
+        memory_limit: str = "512m",
+        cpu_limit: str = "1",
+        command_timeout_seconds: int = 300,
     ) -> None:
         self.base_domain = base_domain
         self.docker_network = docker_network
         self.workspace_root = Path(workspace_root)
-        self.workspace_root.mkdir(parents=True, exist_ok=True)
+        self.memory_limit = memory_limit
+        self.cpu_limit = cpu_limit
+        self.command_timeout_seconds = max(1, command_timeout_seconds)
+        self.workspace_root.mkdir(mode=0o700, parents=True, exist_ok=True)
 
     def launch(self, repo_url: str, session_id: str, image_name: str) -> dict[str, Any]:
         workspace = self.workspace_root / session_id
+        self._ensure_workspace_path(workspace)
         if workspace.exists():
+            if workspace.is_symlink():
+                raise ExecutionRuntimeError("Invalid workspace path generated for session.")
             rmtree(workspace)
         workspace.parent.mkdir(parents=True, exist_ok=True)
 
@@ -139,6 +148,7 @@ class DockerExecutionRuntime:
             "clone",
             "--depth",
             "1",
+            "--single-branch",
             repo_url,
             str(workspace),
             error_context="Failed to clone repository",
@@ -160,10 +170,19 @@ class DockerExecutionRuntime:
             "docker",
             "run",
             "-d",
-            "--memory=512m",
-            "--cpus=1",
+            f"--memory={self.memory_limit}",
+            f"--cpus={self.cpu_limit}",
             "--network",
             self.docker_network,
+            "--read-only",
+            "--tmpfs",
+            "/tmp:rw,noexec,nosuid,size=100m",
+            "--security-opt",
+            "no-new-privileges",
+            "--cap-drop",
+            "ALL",
+            "--pids-limit",
+            "256",
             "--label",
             f"session={session_id}",
             image_name,
@@ -191,7 +210,10 @@ class DockerExecutionRuntime:
                 candidates.append(file_path)
 
         for file_path in candidates:
-            content = file_path.read_text(encoding="utf-8", errors="ignore").lower()
+            try:
+                content = file_path.read_text(encoding="utf-8", errors="strict").lower()
+            except UnicodeDecodeError as exc:
+                raise ExecutionRuntimeError(f"Unable to parse {file_path.name}; file must be UTF-8 text.") from exc
             for pattern in PROHIBITED_CONTAINER_PATTERNS:
                 if pattern in content:
                     raise ExecutionRuntimeError(f"Unsafe configuration detected in {file_path.name}: {pattern}")
@@ -224,8 +246,14 @@ class DockerExecutionRuntime:
 
     def _validate_repo_url(self, repo_url: str) -> None:
         parsed = urlparse(repo_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        hostname = (parsed.hostname or "").lower()
+        if parsed.scheme not in {"http", "https"} or not hostname:
             raise ExecutionRuntimeError("repoUrl must be a valid http(s) URL.")
+        if hostname not in {"github.com", "www.github.com"}:
+            raise ExecutionRuntimeError("repoUrl must point to GitHub.")
+        path_parts = [part for part in parsed.path.split("/") if part]
+        if len(path_parts) < 2 or any(part in {".", ".."} for part in path_parts[:2]):
+            raise ExecutionRuntimeError("repoUrl must include a valid GitHub repository path.")
 
     def _run(
         self,
@@ -233,7 +261,17 @@ class DockerExecutionRuntime:
         check: bool = True,
         error_context: str | None = None,
     ) -> str:
-        completed = subprocess.run(command, check=False, capture_output=True, text=True)
+        try:
+            completed = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=self.command_timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            context = f"{error_context}: " if error_context else ""
+            raise ExecutionRuntimeError(f"{context}Command timed out: {' '.join(command)}") from exc
         output = (completed.stdout or "").strip()
         if check and completed.returncode != 0:
             stderr = (completed.stderr or "").strip()
@@ -241,6 +279,18 @@ class DockerExecutionRuntime:
             context = f"{error_context}: " if error_context else ""
             raise ExecutionRuntimeError(f"{context}{message}")
         return output
+
+    def _ensure_workspace_path(self, workspace: Path) -> None:
+        root = self.workspace_root.resolve()
+        candidate = workspace.resolve(strict=False)
+        if candidate.parent != root:
+            raise ExecutionRuntimeError("Invalid workspace path generated for session.")
+        try:
+            in_root = os.path.commonpath([str(root), str(candidate)]) == str(root)
+        except ValueError as exc:
+            raise ExecutionRuntimeError("Invalid workspace path generated for session.") from exc
+        if not in_root:
+            raise ExecutionRuntimeError("Invalid workspace path generated for session.")
 
 
 class TryContainerService:
@@ -414,7 +464,7 @@ class TryContainerService:
             self._emit_execution_event("ExecutionBuildFailed", session_id, detail=str(exc))
             raise
 
-        return {"sessionId": session_id, "status": "building"}
+        return {"sessionId": session_id, "status": "running"}
 
     def get_execution_session(self, session_id: str) -> dict[str, Any] | None:
         self.cleanup_expired()
@@ -571,8 +621,8 @@ class TryContainerService:
         while not self._cleanup_worker_stop.wait(interval_seconds):
             try:
                 self.cleanup_expired()
-            except Exception:
-                continue
+            except Exception as exc:
+                self._emit_execution_event("ExecutionCleanupFailed", "cleanup-worker", detail=str(exc))
 
     def _find_app(self, app_slug: str) -> AppTemplate:
         for app in CATALOG:
