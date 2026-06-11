@@ -57,7 +57,7 @@ Destroy
 - One-click disposable sessions with trial URLs (`http://<subdomain>.localhost`)
 - Session lifecycle API (launch, list, usage, destroy, TTL cleanup)
 - Real execution API for repository-backed sessions (`/api/execution/*`)
-- Repository intelligence API for pre-launch analysis (`/api/repositories/*`)
+- Repository intelligence runtime in Rust (`services/rust-api/src/repository_intelligence`) for pre-launch analysis (`/api/repositories/*`)
 - Metered billing support (`free`, `metered`, `2-hour-pass`, `day-pass`, `subscription`)
 - Browser UI at `/` to launch and monitor sessions from anywhere
 
