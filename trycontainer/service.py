@@ -22,7 +22,7 @@ from .runtime import (
     profile_resources,
 )
 
-DEFAULT_BASE_DOMAIN = "trycontainer.com"
+DEFAULT_BASE_DOMAIN = "localhost"
 MAX_TTL_MINUTES = 1440
 MIN_TTL_MINUTES = 1
 SUBDOMAIN_TOKEN_BYTES = 3
@@ -36,6 +36,15 @@ PROHIBITED_CONTAINER_PATTERNS = (
     "docker.sock",
     "type: bind",
 )
+
+
+def _is_local_base_domain(base_domain: str) -> bool:
+    return base_domain in {"localhost", "127.0.0.1"} or base_domain.endswith(".localhost")
+
+
+def _build_subdomain_url(subdomain: str, base_domain: str) -> str:
+    scheme = "http" if _is_local_base_domain(base_domain) else "https"
+    return f"{scheme}://{subdomain}.{base_domain}"
 
 
 @dataclass(frozen=True)
@@ -189,6 +198,7 @@ class DockerExecutionRuntime:
             "docker",
             "run",
             "-d",
+            "-P",
             f"--memory={memory_limit or self.memory_limit}",
             f"--cpus={cpu_limit or self.cpu_limit}",
             "--network",
@@ -209,7 +219,12 @@ class DockerExecutionRuntime:
             error_context="Failed to start Docker container",
         )
         container_port = self._discover_container_port(container_id)
-        public_url = f"https://{session_id}.{self.base_domain}"
+        host_port = self._discover_host_port(container_id, container_port)
+        public_url = (
+            f"http://127.0.0.1:{host_port}"
+            if host_port is not None
+            else _build_subdomain_url(session_id, self.base_domain)
+        )
         return {
             "container_id": container_id,
             "container_port": container_port,
@@ -263,6 +278,16 @@ class DockerExecutionRuntime:
         if ports:
             return ports[0]
         return 80
+
+    def _discover_host_port(self, container_id: str, container_port: int) -> int | None:
+        output = self._run("docker", "port", container_id, f"{container_port}/tcp", check=False)
+        if not output:
+            return None
+        for line in output.splitlines():
+            candidate = line.strip().rsplit(":", 1)[-1]
+            if candidate.isdigit():
+                return int(candidate)
+        return None
 
     def _validate_repo_url(self, repo_url: str) -> None:
         parsed = urlparse(repo_url)
@@ -704,7 +729,7 @@ class TryContainerService:
             "id": row["id"],
             "app": row["app_slug"],
             "status": row["status"],
-            "url": f"https://{row['subdomain']}.{self.base_domain}",
+            "url": _build_subdomain_url(row["subdomain"], self.base_domain),
             "created_at": row["created_at"],
             "expires_at": row["expires_at"],
             "ttl_minutes": metadata.get("ttl_minutes"),

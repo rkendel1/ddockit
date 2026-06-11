@@ -63,8 +63,16 @@ class ServiceTests(TestCase):
     def test_launch_session_returns_url(self) -> None:
         session = self.service.launch_session("openwebui")
         self.assertEqual(session["status"], "running")
-        self.assertTrue(session["url"].endswith(".trycontainer.com"))
+        self.assertTrue(session["url"].startswith("http://"))
+        self.assertTrue(session["url"].endswith(".localhost"))
         self.assertEqual(session["ttl_minutes"], 30)
+
+    def test_non_local_base_domain_uses_https_urls(self) -> None:
+        db_path = Path(self.tmpdir.name) / "test_https.db"
+        service = TryContainerService(db_path=db_path, execution_runtime=self.execution_runtime, base_domain="example.com")
+        session = service.launch_session("openwebui")
+        self.assertTrue(session["url"].startswith("https://"))
+        self.assertTrue(session["url"].endswith(".example.com"))
 
     def test_ttl_is_capped_to_day(self) -> None:
         session = self.service.launch_session("n8n", ttl_minutes=10_000)

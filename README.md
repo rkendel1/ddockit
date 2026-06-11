@@ -54,7 +54,7 @@ Destroy
 ## What this app provides
 
 - Curated OSS catalog (OpenWebUI, n8n, Plane, Immich, Supabase, and more)
-- One-click disposable sessions with trial URLs (`https://<subdomain>.trycontainer.com`)
+- One-click disposable sessions with trial URLs (`http://<subdomain>.localhost`)
 - Session lifecycle API (launch, list, usage, destroy, TTL cleanup)
 - Real execution API for repository-backed sessions (`/api/execution/*`)
 - Metered billing support (`free`, `metered`, `2-hour-pass`, `day-pass`, `subscription`)
@@ -81,8 +81,8 @@ Environment overrides:
 
 - `TRYCONTAINER_HOST` (default: `0.0.0.0`)
 - `TRYCONTAINER_PORT` (default: `8080`)
-- `TRYCONTAINER_BASE_DOMAIN` (default: `trycontainer.com`)
-- `TRYCONTAINER_ALLOWED_ORIGIN` (default: unset/no CORS)
+- `TRYCONTAINER_BASE_DOMAIN` (default: `localhost`)
+- `TRYCONTAINER_ALLOWED_ORIGIN` (default: `*`)
 
 ## Real evaluation examples
 
