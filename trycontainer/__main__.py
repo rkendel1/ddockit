@@ -158,8 +158,8 @@ MAX_REPO_URL_LENGTH = 2048
 
 
 class TryContainerHandler(BaseHTTPRequestHandler):
-    service = TryContainerService(base_domain=os.getenv("TRYCONTAINER_BASE_DOMAIN", "trycontainer.com"))
-    allowed_origin = os.getenv("TRYCONTAINER_ALLOWED_ORIGIN", "")
+    service = TryContainerService(base_domain=os.getenv("TRYCONTAINER_BASE_DOMAIN", "localhost"))
+    allowed_origin = os.getenv("TRYCONTAINER_ALLOWED_ORIGIN", "*")
 
     def do_OPTIONS(self) -> None:
         self.send_response(HTTPStatus.NO_CONTENT)
