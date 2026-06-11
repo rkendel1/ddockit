@@ -219,7 +219,7 @@ class ServiceTests(TestCase):
         self.assertTrue(result["id"].startswith("repo_"))
         self.assertEqual(result["category"], "ProjectManagement")
         self.assertGreaterEqual(result["executionScore"], 70)
-        self.assertIn("Next.js", result["frameworks"])
+        self.assertIn("Node.js", result["frameworks"])
 
     def test_repository_alternatives_and_verification_are_retrievable(self) -> None:
         result = self.service.analyze_repository(
@@ -234,5 +234,10 @@ class ServiceTests(TestCase):
         assert verification is not None
         alternative_names = {item["name"] for item in alternatives}
         self.assertIn("OpenProject", alternative_names)
-        self.assertEqual(verification["verification_status"], "verified")
-        self.assertEqual(verification["smoke_test_status"], "HTTP 200")
+        self.assertEqual(verification["verification_status"], "estimated")
+        self.assertEqual(verification["smoke_test_status"], "Estimated launch ready")
+
+    def test_repository_analyze_is_idempotent_for_same_repo_url(self) -> None:
+        first = self.service.analyze_repository("https://github.com/makeplane/plane", detected_files=["README.md"])
+        second = self.service.analyze_repository("https://github.com/makeplane/plane", detected_files=["README.md"])
+        self.assertEqual(first["id"], second["id"])

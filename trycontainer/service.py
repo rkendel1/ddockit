@@ -595,23 +595,26 @@ class TryContainerService:
 
     def analyze_repository(self, repo_url: str, detected_files: list[str] | None = None) -> dict[str, Any]:
         now_iso = _utc_now().isoformat()
-        repository_id = f"repo_{uuid.uuid4().hex[:12]}"
+        existing = self._get_repository_profile_by_repo_url(repo_url)
+        repository_id = existing["id"] if existing else f"repo_{uuid.uuid4().hex[:12]}"
+        created_at = existing["created_at"] if existing else now_iso
         analysis: RepositoryAnalysisResult = self.repository_runtime.analyze(
             repo_url=repo_url,
             detected_files=detected_files,
         )
         profile, fingerprint, verification = analysis
+        primary_category = next((value for value in profile.categories if isinstance(value, str) and value), "Unknown")
         payload = {
             "id": repository_id,
             "repo_url": repo_url,
             "fingerprint": json.dumps(asdict(fingerprint)),
-            "category": profile.categories[0] if profile.categories else "",
+            "category": primary_category,
             "execution_score": profile.execution_score,
             "verification_status": verification.verification_status,
             "last_verified_at": verification.verified_at,
             "profile_json": json.dumps(profile.as_dict()),
             "verification_json": json.dumps(asdict(verification)),
-            "created_at": now_iso,
+            "created_at": created_at,
             "updated_at": now_iso,
         }
         self._upsert_repository_profile(payload)
@@ -826,6 +829,16 @@ class TryContainerService:
     def _get_repository_profile_row(self, repository_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM repository_profiles WHERE id = ?", (repository_id,)).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def _get_repository_profile_by_repo_url(self, repo_url: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM repository_profiles WHERE repo_url = ? ORDER BY updated_at DESC LIMIT 1",
+                (repo_url,),
+            ).fetchone()
         if row is None:
             return None
         return dict(row)

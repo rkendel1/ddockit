@@ -37,6 +37,7 @@ class AlternativeProject:
 @dataclass(frozen=True)
 class RepositoryFingerprint:
     technologies: list[str]
+    detected_files: list[str]
     has_dockerfile: bool
     has_compose: bool
     has_readme: bool
@@ -49,7 +50,7 @@ class ExecutionVerification:
     builds_successfully: bool
     launches_successfully: bool
     smoke_test_status: str
-    startup_time_seconds: int
+    startup_time_seconds: int | None
     verification_status: str
     verified_at: str
 
@@ -78,6 +79,20 @@ RepositoryAnalysisResult = tuple[RepositoryProfile, RepositoryFingerprint, Execu
 
 
 class RepositoryIntelligenceRuntime:
+    _BASE_MATURITY_SCORE = 45
+    _README_MATURITY_BONUS = 15
+    _TESTS_MATURITY_BONUS = 20
+    _POPULARITY_SCORE_PLACEHOLDER = 55
+    _BUILD_READY_THRESHOLD = 60
+    _LAUNCH_READY_THRESHOLD = 70
+    _BASE_EXECUTION_SCORE = 25
+    _DOCKERFILE_EXECUTION_BONUS = 25
+    _COMPOSE_EXECUTION_BONUS = 20
+    _README_EXECUTION_BONUS = 10
+    _ENV_EXAMPLE_EXECUTION_BONUS = 10
+    _TESTS_EXECUTION_BONUS = 10
+    _TECHNOLOGY_EXECUTION_BONUS = 10
+
     _CATEGORY_ALTERNATIVES: dict[RepositoryCategory, tuple[tuple[str, str], ...]] = {
         RepositoryCategory.ProjectManagement: (
             ("OpenProject", "https://github.com/opf/openproject"),
@@ -144,16 +159,23 @@ class RepositoryIntelligenceRuntime:
             frameworks=self._frameworks(fingerprint),
             deployment_model=self._deployment_model(fingerprint),
             execution_score=execution_score,
-            maturity_score=min(100, 45 + (15 if fingerprint.has_readme else 0) + (20 if fingerprint.has_tests else 0)),
-            popularity_score=55,
+            maturity_score=min(
+                100,
+                self._BASE_MATURITY_SCORE
+                + (self._README_MATURITY_BONUS if fingerprint.has_readme else 0)
+                + (self._TESTS_MATURITY_BONUS if fingerprint.has_tests else 0),
+            ),
+            popularity_score=self._POPULARITY_SCORE_PLACEHOLDER,
             alternatives=alternatives,
         )
+        build_ready = execution_score >= self._BUILD_READY_THRESHOLD
+        launch_ready = execution_score >= self._LAUNCH_READY_THRESHOLD
         verification = ExecutionVerification(
-            builds_successfully=execution_score >= 60,
-            launches_successfully=execution_score >= 70,
-            smoke_test_status="HTTP 200" if execution_score >= 70 else "Not verified",
-            startup_time_seconds=42 if execution_score >= 70 else 0,
-            verification_status="verified" if execution_score >= 70 else "pending",
+            builds_successfully=build_ready,
+            launches_successfully=launch_ready,
+            smoke_test_status="Estimated launch ready" if launch_ready else "Estimated setup required",
+            startup_time_seconds=None,
+            verification_status="estimated",
             verified_at=datetime.now(timezone.utc).isoformat(),
         )
         return profile, fingerprint, verification
@@ -182,6 +204,7 @@ class RepositoryIntelligenceRuntime:
                 technologies.append(label)
         return RepositoryFingerprint(
             technologies=technologies,
+            detected_files=sorted(files),
             has_dockerfile=has_dockerfile,
             has_compose=has_compose,
             has_readme=has_readme,
@@ -216,23 +239,26 @@ class RepositoryIntelligenceRuntime:
 
     def _frameworks(self, fingerprint: RepositoryFingerprint) -> list[str]:
         frameworks: list[str] = []
-        if "Node.js" in fingerprint.technologies:
+        files = set(fingerprint.detected_files)
+        has_next_config = any(name in files for name in {"next.config.js", "next.config.mjs", "next.config.ts"})
+        if has_next_config:
             frameworks.append("Next.js")
-        if "Python" in fingerprint.technologies:
-            frameworks.append("FastAPI")
-        if "Go" in fingerprint.technologies:
-            frameworks.append("Gin")
-        if "Rust" in fingerprint.technologies:
-            frameworks.append("Axum")
+        elif "package.json" in files:
+            frameworks.append("Node.js")
+        if "requirements.txt" in files:
+            frameworks.append("Python")
+        if "go.mod" in files:
+            frameworks.append("Go")
+        if "cargo.toml" in files:
+            frameworks.append("Rust")
         if fingerprint.has_compose:
-            frameworks.append("Postgres")
-            frameworks.append("Redis")
+            frameworks.append("Docker Compose")
         return frameworks
 
     def _languages(self, fingerprint: RepositoryFingerprint) -> list[str]:
         mapping = {
             "Rust": "Rust",
-            "Node.js": "TypeScript",
+            "Node.js": "JavaScript",
             "Python": "Python",
             "Go": "Go",
         }
@@ -248,19 +274,19 @@ class RepositoryIntelligenceRuntime:
         return DeploymentModel.UNKNOWN
 
     def _execution_score(self, fingerprint: RepositoryFingerprint) -> int:
-        score = 25
+        score = self._BASE_EXECUTION_SCORE
         if fingerprint.has_dockerfile:
-            score += 25
+            score += self._DOCKERFILE_EXECUTION_BONUS
         if fingerprint.has_compose:
-            score += 20
+            score += self._COMPOSE_EXECUTION_BONUS
         if fingerprint.has_readme:
-            score += 10
+            score += self._README_EXECUTION_BONUS
         if fingerprint.has_env_example:
-            score += 10
+            score += self._ENV_EXAMPLE_EXECUTION_BONUS
         if fingerprint.has_tests:
-            score += 10
+            score += self._TESTS_EXECUTION_BONUS
         if fingerprint.technologies:
-            score += 10
+            score += self._TECHNOLOGY_EXECUTION_BONUS
         return max(0, min(100, score))
 
     def _alternatives(self, category: RepositoryCategory) -> list[AlternativeProject]:
