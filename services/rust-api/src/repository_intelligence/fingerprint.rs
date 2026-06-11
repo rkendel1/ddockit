@@ -26,6 +26,10 @@ pub fn build_fingerprint(files: &HashSet<String>) -> RepositoryFingerprint {
         frameworks.push(Framework::NodeJs);
     }
 
+    if files.contains("package.json") {
+        technologies.push("Node.js".to_string());
+        languages.push("JavaScript".to_string());
+    }
     if files.contains("requirements.txt") {
         frameworks.push(Framework::Python);
         technologies.push("Python".to_string());
@@ -40,10 +44,6 @@ pub fn build_fingerprint(files: &HashSet<String>) -> RepositoryFingerprint {
         frameworks.push(Framework::Rust);
         technologies.push("Rust".to_string());
         languages.push("Rust".to_string());
-    }
-    if files.contains("package.json") {
-        technologies.push("Node.js".to_string());
-        languages.push("JavaScript".to_string());
     }
     if has_dockerfile {
         technologies.push("Docker".to_string());

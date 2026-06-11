@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 
+use chrono::Utc;
 use pulldown_cmark::{Event, Parser};
 use tokio::fs;
 
@@ -76,7 +77,7 @@ pub async fn analyze(input: RepositoryAnalysisInput) -> RepositoryAnalysisRespon
         },
         startup_time_seconds: None,
         verification_status: "estimated".to_string(),
-        verified_at: "1970-01-01T00:00:00+00:00".to_string(),
+        verified_at: Utc::now().to_rfc3339(),
     };
 
     RepositoryAnalysisResponse {

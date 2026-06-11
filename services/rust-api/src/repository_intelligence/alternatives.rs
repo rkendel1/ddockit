@@ -52,7 +52,7 @@ pub fn discover(category: &str) -> Vec<AlternativeProject> {
         ],
     };
 
-    let mut score = 95u8;
+    let mut similarity_score = 95u8;
     projects
         .into_iter()
         .map(|(name, repo_url)| {
@@ -60,9 +60,9 @@ pub fn discover(category: &str) -> Vec<AlternativeProject> {
                 name: name.to_string(),
                 repo_url: repo_url.to_string(),
                 category: category.to_string(),
-                similarity_score: score,
+                similarity_score,
             };
-            score = score.saturating_sub(10).max(60);
+            similarity_score = similarity_score.saturating_sub(10).max(60);
             project
         })
         .collect()

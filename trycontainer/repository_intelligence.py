@@ -153,8 +153,8 @@ class RepositoryIntelligenceRuntime:
             launches_successfully=bool(verification_data.get("launchesSuccessfully", verification_data.get("launches_successfully", False))),
             smoke_test_status=str(verification_data.get("smokeTestStatus", verification_data.get("smoke_test_status", "Estimated setup required"))),
             startup_time_seconds=(
-                int(verification_data["startupTimeSeconds"])
-                if verification_data.get("startupTimeSeconds") is not None
+                int(verification_data.get("startupTimeSeconds", verification_data.get("startup_time_seconds")))
+                if verification_data.get("startupTimeSeconds", verification_data.get("startup_time_seconds")) is not None
                 else None
             ),
             verification_status=str(verification_data.get("verificationStatus", verification_data.get("verification_status", "estimated"))),
