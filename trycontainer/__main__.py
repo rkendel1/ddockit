@@ -197,6 +197,18 @@ class TryContainerHandler(BaseHTTPRequestHandler):
             if session is None:
                 return self._json({"error": "Session not found"}, status=HTTPStatus.NOT_FOUND)
             return self._json({"session": session})
+        if len(path_parts) == 4 and path_parts[:2] == ["api", "repositories"] and path_parts[3] == "alternatives":
+            repository_id = path_parts[2]
+            alternatives = self.service.get_repository_alternatives(repository_id)
+            if alternatives is None:
+                return self._json({"error": "Repository profile not found"}, status=HTTPStatus.NOT_FOUND)
+            return self._json({"alternatives": alternatives})
+        if len(path_parts) == 4 and path_parts[:2] == ["api", "repositories"] and path_parts[3] == "verification":
+            repository_id = path_parts[2]
+            verification = self.service.get_repository_verification(repository_id)
+            if verification is None:
+                return self._json({"error": "Repository profile not found"}, status=HTTPStatus.NOT_FOUND)
+            return self._json({"verification": verification})
         if len(path_parts) == 4 and path_parts[:2] == ["api", "execution"] and path_parts[3] == "environment":
             execution_id = path_parts[2]
             environment = self.service.get_execution_environment(execution_id)
@@ -215,6 +227,27 @@ class TryContainerHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         self.service.cleanup_expired()
         parsed = urlparse(self.path)
+
+        if parsed.path == "/api/repositories/analyze":
+            try:
+                body = self._read_body()
+            except ValueError as exc:
+                return self._json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            repo_url = body.get("repoUrl")
+            if not isinstance(repo_url, str) or not repo_url:
+                return self._json({"error": "'repoUrl' is required"}, status=HTTPStatus.BAD_REQUEST)
+            if len(repo_url) > MAX_REPO_URL_LENGTH:
+                return self._json({"error": "'repoUrl' exceeds maximum length"}, status=HTTPStatus.BAD_REQUEST)
+            detected_files = body.get("detectedFiles")
+            if detected_files is not None and not (
+                isinstance(detected_files, list) and all(isinstance(value, str) for value in detected_files)
+            ):
+                return self._json({"error": "'detectedFiles' must be an array of strings"}, status=HTTPStatus.BAD_REQUEST)
+            try:
+                result = self.service.analyze_repository(repo_url=repo_url, detected_files=detected_files)
+            except ValueError as exc:
+                return self._json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return self._json(result, status=HTTPStatus.CREATED)
 
         if parsed.path == "/api/execution/launch":
             try:

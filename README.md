@@ -57,6 +57,7 @@ Destroy
 - One-click disposable sessions with trial URLs (`http://<subdomain>.localhost`)
 - Session lifecycle API (launch, list, usage, destroy, TTL cleanup)
 - Real execution API for repository-backed sessions (`/api/execution/*`)
+- Repository intelligence API for pre-launch analysis (`/api/repositories/*`)
 - Metered billing support (`free`, `metered`, `2-hour-pass`, `day-pass`, `subscription`)
 - Browser UI at `/` to launch and monitor sessions from anywhere
 
@@ -155,6 +156,17 @@ curl -X POST http://127.0.0.1:8080/sessions \
 curl -X POST http://127.0.0.1:8080/api/execution/launch \
   -H 'content-type: application/json' \
   -d '{"repoUrl":"https://github.com/org/project","profile":"standard","capabilities":["postgres","redis","openaiProxy"]}'
+
+# analyze repository intelligence before launching
+curl -X POST http://127.0.0.1:8080/api/repositories/analyze \
+  -H 'content-type: application/json' \
+  -d '{"repoUrl":"https://github.com/makeplane/plane","detectedFiles":["README.md","Dockerfile","docker-compose.yml","package.json"]}'
+
+# fetch alternatives for an analyzed repository
+curl http://127.0.0.1:8080/api/repositories/<repository_id>/alternatives
+
+# fetch verification metadata for an analyzed repository
+curl http://127.0.0.1:8080/api/repositories/<repository_id>/verification
 
 # check execution session status
 curl http://127.0.0.1:8080/api/execution/<session_id>

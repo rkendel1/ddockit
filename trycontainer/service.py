@@ -15,6 +15,10 @@ from shutil import rmtree
 from typing import Any
 from urllib.parse import urlparse
 
+from .repository_intelligence import (
+    RepositoryAnalysisResult,
+    RepositoryIntelligenceRuntime,
+)
 from .runtime import (
     RuntimeProfile,
     assemble_environment,
@@ -344,11 +348,13 @@ class TryContainerService:
         db_path: str | Path = "trycontainer.db",
         runtime: RuntimeAdapter | None = None,
         execution_runtime: DockerExecutionRuntime | None = None,
+        repository_runtime: RepositoryIntelligenceRuntime | None = None,
         base_domain: str = DEFAULT_BASE_DOMAIN,
     ):
         self.db_path = str(db_path)
         self.runtime = runtime or RuntimeAdapter()
         self.execution_runtime = execution_runtime or DockerExecutionRuntime(base_domain=base_domain)
+        self.repository_runtime = repository_runtime or RepositoryIntelligenceRuntime()
         self.base_domain = base_domain
         self._cleanup_worker_thread: threading.Thread | None = None
         self._cleanup_worker_lock = threading.Lock()
@@ -391,6 +397,23 @@ class TryContainerService:
                     capabilities TEXT NOT NULL DEFAULT '[]',
                     environment_id TEXT,
                     expires_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS repository_profiles (
+                    id TEXT PRIMARY KEY,
+                    repo_url TEXT NOT NULL,
+                    fingerprint TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    execution_score INTEGER NOT NULL,
+                    verification_status TEXT NOT NULL,
+                    last_verified_at TEXT,
+                    profile_json TEXT NOT NULL,
+                    verification_json TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
@@ -570,6 +593,57 @@ class TryContainerService:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def analyze_repository(self, repo_url: str, detected_files: list[str] | None = None) -> dict[str, Any]:
+        now_iso = _utc_now().isoformat()
+        repository_id = f"repo_{uuid.uuid4().hex[:12]}"
+        analysis: RepositoryAnalysisResult = self.repository_runtime.analyze(
+            repo_url=repo_url,
+            detected_files=detected_files,
+        )
+        profile, fingerprint, verification = analysis
+        payload = {
+            "id": repository_id,
+            "repo_url": repo_url,
+            "fingerprint": json.dumps(asdict(fingerprint)),
+            "category": profile.categories[0] if profile.categories else "",
+            "execution_score": profile.execution_score,
+            "verification_status": verification.verification_status,
+            "last_verified_at": verification.verified_at,
+            "profile_json": json.dumps(profile.as_dict()),
+            "verification_json": json.dumps(asdict(verification)),
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        }
+        self._upsert_repository_profile(payload)
+        return {
+            "id": repository_id,
+            "executionScore": profile.execution_score,
+            "category": payload["category"],
+            "frameworks": profile.frameworks,
+            "languages": profile.languages,
+            "name": profile.name,
+            "description": profile.description,
+        }
+
+    def get_repository_alternatives(self, repository_id: str) -> list[dict[str, Any]] | None:
+        row = self._get_repository_profile_row(repository_id)
+        if row is None:
+            return None
+        profile = json.loads(row["profile_json"])
+        alternatives = profile.get("alternatives", [])
+        if not isinstance(alternatives, list):
+            return []
+        return [item for item in alternatives if isinstance(item, dict)]
+
+    def get_repository_verification(self, repository_id: str) -> dict[str, Any] | None:
+        row = self._get_repository_profile_row(repository_id)
+        if row is None:
+            return None
+        verification = json.loads(row["verification_json"])
+        if isinstance(verification, dict):
+            return verification
+        return None
+
     def destroy_execution_session(self, session_id: str, reason: str = "manual") -> bool:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM execution_sessions WHERE id = ?", (session_id,)).fetchone()
@@ -744,6 +818,25 @@ class TryContainerService:
                 INSERT OR REPLACE INTO execution_sessions
                 (id, tenant_id, repo_url, image_name, container_id, container_port, status, public_url, profile, capabilities, environment_id, expires_at, created_at, updated_at)
                 VALUES (:id, :tenant_id, :repo_url, :image_name, :container_id, :container_port, :status, :public_url, :profile, :capabilities, :environment_id, :expires_at, :created_at, :updated_at)
+                """,
+                payload,
+            )
+            conn.commit()
+
+    def _get_repository_profile_row(self, repository_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM repository_profiles WHERE id = ?", (repository_id,)).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def _upsert_repository_profile(self, payload: dict[str, Any]) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO repository_profiles
+                (id, repo_url, fingerprint, category, execution_score, verification_status, last_verified_at, profile_json, verification_json, created_at, updated_at)
+                VALUES (:id, :repo_url, :fingerprint, :category, :execution_score, :verification_status, :last_verified_at, :profile_json, :verification_json, :created_at, :updated_at)
                 """,
                 payload,
             )

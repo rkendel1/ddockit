@@ -210,3 +210,29 @@ class ServiceTests(TestCase):
         runtime = DockerExecutionRuntime(workspace_root=self.tmpdir.name, base_domain="trycontainer.test")
         with self.assertRaises(ExecutionRuntimeError):
             runtime._validate_repo_url("https://example.com/private/repo")
+
+    def test_repository_analyze_returns_expected_summary(self) -> None:
+        result = self.service.analyze_repository(
+            "https://github.com/makeplane/plane",
+            detected_files=["README.md", "Dockerfile", "docker-compose.yml", "package.json"],
+        )
+        self.assertTrue(result["id"].startswith("repo_"))
+        self.assertEqual(result["category"], "ProjectManagement")
+        self.assertGreaterEqual(result["executionScore"], 70)
+        self.assertIn("Next.js", result["frameworks"])
+
+    def test_repository_alternatives_and_verification_are_retrievable(self) -> None:
+        result = self.service.analyze_repository(
+            "https://github.com/makeplane/plane",
+            detected_files=["README.md", "Dockerfile", "docker-compose.yml", "package.json"],
+        )
+        repository_id = result["id"]
+        alternatives = self.service.get_repository_alternatives(repository_id)
+        verification = self.service.get_repository_verification(repository_id)
+
+        assert alternatives is not None
+        assert verification is not None
+        alternative_names = {item["name"] for item in alternatives}
+        self.assertIn("OpenProject", alternative_names)
+        self.assertEqual(verification["verification_status"], "verified")
+        self.assertEqual(verification["smoke_test_status"], "HTTP 200")
