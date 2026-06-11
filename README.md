@@ -154,10 +154,13 @@ curl -X POST http://127.0.0.1:8080/sessions \
 # launch a repository execution session
 curl -X POST http://127.0.0.1:8080/api/execution/launch \
   -H 'content-type: application/json' \
-  -d '{"repoUrl":"https://github.com/org/project"}'
+  -d '{"repoUrl":"https://github.com/org/project","profile":"standard","capabilities":["postgres","redis","openaiProxy"]}'
 
 # check execution session status
 curl http://127.0.0.1:8080/api/execution/<session_id>
+
+# inspect execution environment profile/capabilities
+curl http://127.0.0.1:8080/api/execution/<session_id>/environment
 
 # destroy execution session
 curl -X DELETE http://127.0.0.1:8080/api/execution/<session_id>

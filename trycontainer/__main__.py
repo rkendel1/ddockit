@@ -6,6 +6,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+from .runtime import RuntimeProfile
 from .service import ExecutionRuntimeError, TryContainerService
 
 HTML_INDEX = """<!doctype html>
@@ -196,6 +197,12 @@ class TryContainerHandler(BaseHTTPRequestHandler):
             if session is None:
                 return self._json({"error": "Session not found"}, status=HTTPStatus.NOT_FOUND)
             return self._json({"session": session})
+        if len(path_parts) == 4 and path_parts[:2] == ["api", "execution"] and path_parts[3] == "environment":
+            execution_id = path_parts[2]
+            environment = self.service.get_execution_environment(execution_id)
+            if environment is None:
+                return self._json({"error": "Session not found"}, status=HTTPStatus.NOT_FOUND)
+            return self._json(environment)
         if len(path_parts) == 3 and path_parts[:2] == ["api", "execution"]:
             execution_id = path_parts[2]
             session = self.service.get_execution_session(execution_id)
@@ -219,9 +226,25 @@ class TryContainerHandler(BaseHTTPRequestHandler):
                 return self._json({"error": "'repoUrl' is required"}, status=HTTPStatus.BAD_REQUEST)
             if len(repo_url) > MAX_REPO_URL_LENGTH:
                 return self._json({"error": "'repoUrl' exceeds maximum length"}, status=HTTPStatus.BAD_REQUEST)
+            profile_raw = body.get("profile", RuntimeProfile.STANDARD.value)
             try:
-                result = self.service.launch_execution(repo_url=repo_url)
+                profile = RuntimeProfile(profile_raw)
+            except ValueError:
+                return self._json({"error": "'profile' is invalid"}, status=HTTPStatus.BAD_REQUEST)
+            capabilities = body.get("capabilities")
+            if capabilities is not None and not (
+                isinstance(capabilities, list) and all(isinstance(value, str) for value in capabilities)
+            ):
+                return self._json({"error": "'capabilities' must be an array of strings"}, status=HTTPStatus.BAD_REQUEST)
+            try:
+                result = self.service.launch_execution(
+                    repo_url=repo_url,
+                    profile=profile,
+                    capability_names=capabilities,
+                )
             except ExecutionRuntimeError as exc:
+                return self._json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            except ValueError as exc:
                 return self._json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
             return self._json(result, status=HTTPStatus.CREATED)
 

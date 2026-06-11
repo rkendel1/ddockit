@@ -15,6 +15,13 @@ from shutil import rmtree
 from typing import Any
 from urllib.parse import urlparse
 
+from .runtime import (
+    RuntimeProfile,
+    assemble_environment,
+    normalize_capabilities,
+    profile_resources,
+)
+
 DEFAULT_BASE_DOMAIN = "trycontainer.com"
 MAX_TTL_MINUTES = 1440
 MIN_TTL_MINUTES = 1
@@ -133,7 +140,15 @@ class DockerExecutionRuntime:
         self.command_timeout_seconds = max(1, command_timeout_seconds)
         self.workspace_root.mkdir(mode=0o700, parents=True, exist_ok=True)
 
-    def launch(self, repo_url: str, session_id: str, image_name: str) -> dict[str, Any]:
+    def launch(
+        self,
+        repo_url: str,
+        session_id: str,
+        image_name: str,
+        environment_variables: dict[str, str] | None = None,
+        cpu_limit: str | None = None,
+        memory_limit: str | None = None,
+    ) -> dict[str, Any]:
         workspace = self.workspace_root / session_id
         self._ensure_workspace_path(workspace)
         if workspace.exists():
@@ -166,12 +181,16 @@ class DockerExecutionRuntime:
             str(workspace),
             error_context="Failed to build Docker image",
         )
+        env_args: list[str] = []
+        for key, value in sorted((environment_variables or {}).items()):
+            env_args.extend(["-e", f"{key}={value}"])
+
         container_id = self._run(
             "docker",
             "run",
             "-d",
-            f"--memory={self.memory_limit}",
-            f"--cpus={self.cpu_limit}",
+            f"--memory={memory_limit or self.memory_limit}",
+            f"--cpus={cpu_limit or self.cpu_limit}",
             "--network",
             self.docker_network,
             "--read-only",
@@ -185,6 +204,7 @@ class DockerExecutionRuntime:
             "256",
             "--label",
             f"session={session_id}",
+            *env_args,
             image_name,
             error_context="Failed to start Docker container",
         )
@@ -342,12 +362,25 @@ class TryContainerService:
                     container_port INTEGER,
                     status TEXT NOT NULL,
                     public_url TEXT,
+                    profile TEXT NOT NULL DEFAULT 'standard',
+                    capabilities TEXT NOT NULL DEFAULT '[]',
+                    environment_id TEXT,
                     expires_at TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
                 """
             )
+            columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(execution_sessions)").fetchall()
+            }
+            if "profile" not in columns:
+                conn.execute("ALTER TABLE execution_sessions ADD COLUMN profile TEXT NOT NULL DEFAULT 'standard'")
+            if "capabilities" not in columns:
+                conn.execute("ALTER TABLE execution_sessions ADD COLUMN capabilities TEXT NOT NULL DEFAULT '[]'")
+            if "environment_id" not in columns:
+                conn.execute("ALTER TABLE execution_sessions ADD COLUMN environment_id TEXT")
             conn.commit()
 
     def list_apps(self) -> list[dict[str, Any]]:
@@ -421,11 +454,20 @@ class TryContainerService:
 
         return self._public_session(payload)
 
-    def launch_execution(self, repo_url: str, tenant_id: str = DEFAULT_TENANT_ID) -> dict[str, Any]:
+    def launch_execution(
+        self,
+        repo_url: str,
+        tenant_id: str = DEFAULT_TENANT_ID,
+        profile: RuntimeProfile = RuntimeProfile.STANDARD,
+        capability_names: list[str] | None = None,
+    ) -> dict[str, Any]:
         created_at = _utc_now()
-        expires_at = created_at + timedelta(minutes=DEFAULT_EXECUTION_TTL_MINUTES)
+        profile_limits = profile_resources(profile)
+        expires_at = created_at + timedelta(minutes=profile_limits["ttl_minutes"])
         session_id = f"sess_{uuid.uuid4().hex[:12]}"
         image_name = f"ddockit-session-{session_id}"
+        capabilities = normalize_capabilities(capability_names)
+        environment = assemble_environment(session_id=session_id, profile=profile, capabilities=capabilities)
         payload = {
             "id": session_id,
             "tenant_id": tenant_id,
@@ -435,6 +477,9 @@ class TryContainerService:
             "container_port": None,
             "status": "building",
             "public_url": None,
+            "profile": profile.value,
+            "capabilities": json.dumps([capability.value for capability in capabilities]),
+            "environment_id": environment.id,
             "expires_at": expires_at.isoformat(),
             "created_at": created_at.isoformat(),
             "updated_at": created_at.isoformat(),
@@ -444,7 +489,14 @@ class TryContainerService:
         self._emit_execution_event("ExecutionBuildStarted", session_id)
 
         try:
-            details = self.execution_runtime.launch(repo_url=repo_url, session_id=session_id, image_name=image_name)
+            details = self.execution_runtime.launch(
+                repo_url=repo_url,
+                session_id=session_id,
+                image_name=image_name,
+                environment_variables=environment.environment_variables,
+                cpu_limit=str(profile_limits["cpu"]),
+                memory_limit=profile_limits["memory"],
+            )
             now_iso = _utc_now().isoformat()
             payload.update(
                 {
@@ -465,6 +517,16 @@ class TryContainerService:
             raise
 
         return {"sessionId": session_id, "status": "running"}
+
+    def get_execution_environment(self, session_id: str) -> dict[str, Any] | None:
+        session = self.get_execution_session(session_id)
+        if session is None:
+            return None
+        return {
+            "profile": session["profile"],
+            "capabilities": json.loads(session["capabilities"]),
+            "environmentId": session["environment_id"],
+        }
 
     def get_execution_session(self, session_id: str) -> dict[str, Any] | None:
         self.cleanup_expired()
@@ -655,8 +717,8 @@ class TryContainerService:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO execution_sessions
-                (id, tenant_id, repo_url, image_name, container_id, container_port, status, public_url, expires_at, created_at, updated_at)
-                VALUES (:id, :tenant_id, :repo_url, :image_name, :container_id, :container_port, :status, :public_url, :expires_at, :created_at, :updated_at)
+                (id, tenant_id, repo_url, image_name, container_id, container_port, status, public_url, profile, capabilities, environment_id, expires_at, created_at, updated_at)
+                VALUES (:id, :tenant_id, :repo_url, :image_name, :container_id, :container_port, :status, :public_url, :profile, :capabilities, :environment_id, :expires_at, :created_at, :updated_at)
                 """,
                 payload,
             )
